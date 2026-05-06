@@ -8,5 +8,11 @@ resource "aws_s3_object" "overview_dashboard" {
   source                 = "${path.module}/grafana_dashboards/overview.json"
   server_side_encryption = "aws:kms"
   acl                    = "private"
-  etag                   = filemd5("${path.module}/grafana_dashboards/overview.json")
+  source_hash            = filemd5("${path.module}/grafana_dashboards/overview.json")
+
+  override_provider {
+    default_tags {
+      tags = {}
+    }
+  }
 }
