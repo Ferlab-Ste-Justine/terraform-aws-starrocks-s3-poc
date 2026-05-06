@@ -26,6 +26,10 @@ variable "subnet_id" {
 variable "domain_name" {
 }
 
+variable "create_dns_record" {
+  default = true
+}
+
 variable "private_dns_zone" {
   default = true
 }
