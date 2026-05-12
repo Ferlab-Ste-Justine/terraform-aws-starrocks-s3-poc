@@ -3,7 +3,7 @@ output "fe_dns_name" {
 }
 
 output "grafana_address" {
-  value = aws_instance.star_rocks_grafana.private_ip
+  value = one(aws_instance.star_rocks_grafana[*].private_ip)
 }
 
 output "star_rocks_role_arn" {

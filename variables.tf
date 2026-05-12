@@ -78,6 +78,10 @@ variable "monitoring_instance_type" {
   default = "m6i.large"
 }
 
+variable "include_prometheus_monitoring" {
+  default = true
+}
+
 variable "star_rocks_version" {
   default = "3.4.4"
 }
