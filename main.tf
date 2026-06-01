@@ -86,7 +86,7 @@ resource "aws_instance" "star_rocks_compute_nodes" {
   user_data = templatefile("${path.module}/templates/compute_node_startup.sh.tpl", {
     starrocks_version   = count.index == (local.canary_compute_node_count - 1) ? var.star_rocks_version : local.canary_version
     starrocks_data_path = var.starrocks_data_path
-    fe_host             = aws_route53_record.private_star_rocks_dns.fqdn
+    fe_host             = "${var.project}-${var.environment}.${var.domain_name}"
     fe_query_port       = 9030
     vpc_cidr            = data.aws_vpc.target_vpc.cidr_block
     java_heap_size_mb   = var.compute_node_heap_size

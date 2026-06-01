@@ -1,10 +1,12 @@
 data "aws_route53_zone" "private_dns_zone" {
+  count        = var.create_dns_record ? 1 : 0
   name         = "${var.domain_name}."
   private_zone = var.private_dns_zone
 }
 
 resource "aws_route53_record" "private_star_rocks_dns" {
-  zone_id = data.aws_route53_zone.private_dns_zone.zone_id
+  count   = var.create_dns_record ? 1 : 0
+  zone_id = data.aws_route53_zone.private_dns_zone[0].zone_id
   name    = "${var.project}-${var.environment}"
   type    = "A"
 

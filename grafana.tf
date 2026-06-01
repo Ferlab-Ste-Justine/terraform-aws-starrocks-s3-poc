@@ -1,8 +1,9 @@
 resource "aws_instance" "star_rocks_grafana" {
+  count         = var.include_prometheus_monitoring ? 1 : 0
   ami           = var.ami_id
   instance_type = var.monitoring_instance_type
   user_data = templatefile("${path.module}/templates/grafana_startup.sh.tpl", {
-    prometheus_ip = aws_instance.star_rocks_prometheus.private_ip
+    prometheus_ip = aws_instance.star_rocks_prometheus[0].private_ip
     bucket        = "${var.starrocks_bucket}"
     pw_secret     = "${var.project}-${var.environment}-grafana-admin-pw"
   })
@@ -37,6 +38,7 @@ resource "aws_instance" "star_rocks_grafana" {
 
 
 resource "aws_instance" "star_rocks_prometheus" {
+  count         = var.include_prometheus_monitoring ? 1 : 0
   ami           = var.ami_id
   instance_type = var.monitoring_instance_type
   user_data = templatefile("${path.module}/templates/prometheus_startup.sh.tpl", {
