@@ -15,7 +15,7 @@ locals {
   # Extra canary FE and CN nodes are added to teh instance count automatically.
   # Two FE nodes are needed to avoid leader election issues (cluster needs a minimum of 3 FEs)
   canary_frontend_node_count = var.star_rocks_upgrade_version != "" ? var.frontend_instance_count + 2 : var.frontend_instance_count
-  canary_compute_node_count = var.star_rocks_upgrade_version != "" ? var.compute_node_instance_count + 1 : var.compute_node_instance_count
+  canary_compute_node_count  = var.star_rocks_upgrade_version != "" ? var.compute_node_instance_count + 1 : var.compute_node_instance_count
 }
 
 # Manually controlled leader IP node for upgrades
@@ -36,14 +36,14 @@ resource "aws_instance" "star_rocks_frontend" {
   ami           = var.ami_id
   instance_type = var.frontend_instance_type
   user_data = templatefile("${path.module}/templates/frontend_startup.sh.tpl", {
-    starrocks_version   = count.index == 0 ? var.star_rocks_version : local.canary_version
-    starrocks_data_path = var.starrocks_data_path
-    region              = var.region
-    bucket              = "${var.starrocks_bucket}"
-    vpc_cidr            = data.aws_vpc.target_vpc.cidr_block
-    java_heap_size_mb   = var.frontend_heap_size
-    region              = var.region
-    ssm_parameter_name  = aws_ssm_parameter.leader_ip.name
+    starrocks_version       = count.index == 0 ? var.star_rocks_version : local.canary_version
+    starrocks_data_path     = var.starrocks_data_path
+    region                  = var.region
+    bucket                  = "${var.starrocks_bucket}"
+    vpc_cidr                = data.aws_vpc.target_vpc.cidr_block
+    java_heap_size_mb       = var.frontend_heap_size
+    region                  = var.region
+    ssm_parameter_name      = aws_ssm_parameter.leader_ip.name
     additional_fe_user_data = var.additional_fe_user_data
   })
   iam_instance_profile   = aws_iam_instance_profile.star_rocks_instance_profile.name
@@ -84,12 +84,12 @@ resource "aws_instance" "star_rocks_compute_nodes" {
   ami           = var.ami_id
   instance_type = var.compute_node_instance_type
   user_data = templatefile("${path.module}/templates/compute_node_startup.sh.tpl", {
-    starrocks_version   = count.index == (local.canary_compute_node_count - 1) ? var.star_rocks_version : local.canary_version
-    starrocks_data_path = var.starrocks_data_path
-    fe_host             = "${var.project}-${var.environment}.${var.domain_name}"
-    fe_query_port       = 9030
-    vpc_cidr            = data.aws_vpc.target_vpc.cidr_block
-    java_heap_size_mb   = var.compute_node_heap_size
+    starrocks_version       = count.index == (local.canary_compute_node_count - 1) ? var.star_rocks_version : local.canary_version
+    starrocks_data_path     = var.starrocks_data_path
+    fe_host                 = "${var.project}-${var.environment}.${var.domain_name}"
+    fe_query_port           = 9030
+    vpc_cidr                = data.aws_vpc.target_vpc.cidr_block
+    java_heap_size_mb       = var.compute_node_heap_size
     additional_cn_user_data = var.additional_cn_user_data
   })
   iam_instance_profile   = aws_iam_instance_profile.star_rocks_instance_profile.name
