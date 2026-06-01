@@ -1,6 +1,6 @@
 #!/bin/bash
 JAVA_PACKAGE=java-17-amazon-corretto
-sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 || (sleep 120 ; sudo dnf install -y $JAVA_PACKAGE-devel mariadb105)
+sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 xfsprogs || (sleep 120 ; sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 xfsprogs)
 
 sudo su
 
@@ -30,7 +30,6 @@ fi
 if test -f /sys/kernel/mm/transparent_hugepage/defrag; then
    echo madvise > /sys/kernel/mm/transparent_hugepage/defrag
 fi
-echo kyber | sudo tee /sys/block/nvme0p1/queue/scheduler
 EOF
 chmod +x /etc/rc.d/rc.local
 
@@ -58,10 +57,44 @@ datacache_mem_size = 40%
 datacache_disk_size = 80%
 EOF
 
+# Prepare the local NVMe instance-store disk for the CN storage/datacache path.
+# Runs on every boot via systemd so it survives reboots (filesystem persists) and
+# stop/start (instance store comes back blank -> reformatted). No-op when the
+# instance has no local NVMe (e.g. non-"d" instance types) -> storage stays on root.
+sudo tee /usr/local/bin/starrocks-storage.sh > /dev/null << 'STORAGE_EOF'
+#!/bin/bash
+set -e
+DEV=$(lsblk -dpno NAME,MODEL | awk '/Amazon EC2 NVMe Instance Storage/{print $1; exit}')
+if [ -z "$DEV" ]; then exit 0; fi
+MOUNT=${starrocks_data_path}/storage
+mkdir -p "$MOUNT"
+blkid "$DEV" >/dev/null 2>&1 || mkfs.xfs -f "$DEV"
+mountpoint -q "$MOUNT" || mount "$DEV" "$MOUNT"
+# StarRocks recommends the kyber I/O scheduler for SSD/NVMe data disks.
+echo kyber > /sys/block/$(basename "$DEV")/queue/scheduler
+STORAGE_EOF
+sudo chmod +x /usr/local/bin/starrocks-storage.sh
+
+sudo tee /etc/systemd/system/starrocks-storage.service > /dev/null << EOF
+[Unit]
+Description=Prepare StarRocks local NVMe storage (format-if-needed, mount, scheduler)
+After=local-fs.target
+Before=starrocks-cn.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/usr/local/bin/starrocks-storage.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 sudo tee /etc/systemd/system/starrocks-cn.service > /dev/null << EOF
 [Unit]
 Description=StarRocks Compute Node
-After=network.target
+Requires=starrocks-storage.service
+After=starrocks-storage.service network.target
 
 [Service]
 Type=simple
@@ -78,6 +111,7 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
+sudo systemctl enable --now starrocks-storage.service
 sudo systemctl enable starrocks-cn
 sudo systemctl start starrocks-cn
 
