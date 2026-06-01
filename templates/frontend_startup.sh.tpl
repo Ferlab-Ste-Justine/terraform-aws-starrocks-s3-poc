@@ -1,6 +1,6 @@
 #!/bin/bash
 JAVA_PACKAGE=java-17-amazon-corretto
-sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 || (sleep 120 ; sudo dnf install -y $JAVA_PACKAGE-devel mariadb105)
+sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 jq || (sleep 120 ; sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 jq)
 
 sudo su
 
@@ -142,22 +142,45 @@ EOF
 mkdir -p /tmp/starrocks-hadoop /tmp/starrocks-s3a-buffer
 chmod 777 /tmp/starrocks-hadoop /tmp/starrocks-s3a-buffer
 
+# When an SSL secret is provided, serve MySQL-protocol connections over TLS and
+# require it. The cert/key are packed into a PKCS12 keystore (the only artifact
+# StarRocks reads at runtime), then the plaintext copies are removed.
+SSL_SECRET="${ssl_secret_name}"
+if [ -n "$SSL_SECRET" ]; then
+   mkdir -p /opt/ssl
+   umask 077
+   SSL_JSON=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$SSL_SECRET" --query SecretString --output text)
+   echo "$SSL_JSON" | jq -r .server_cert > /opt/ssl/starrocks.crt
+   echo "$SSL_JSON" | jq -r .server_key > /opt/ssl/starrocks.key
+   KEYSTORE_PW=$(echo "$SSL_JSON" | jq -r .keystore_password)
+   openssl pkcs12 -export -in /opt/ssl/starrocks.crt -inkey /opt/ssl/starrocks.key -out /opt/ssl/starrocks.p12 -passout pass:"$KEYSTORE_PW"
+   rm -f /opt/ssl/starrocks.crt /opt/ssl/starrocks.key
+   cat >> ${starrocks_data_path}/fe/conf/fe.conf << SSLEOF
+ssl_keystore_location = /opt/ssl/starrocks.p12
+ssl_keystore_password = $KEYSTORE_PW
+ssl_key_password = $KEYSTORE_PW
+ssl_force_secure_transport = true
+SSLEOF
+   unset SSL_JSON KEYSTORE_PW
+fi
+
 LEADER_IP=$(aws ssm get-parameter --name ${ssm_parameter_name} --region ${region} --output text --query "Parameter.Value")
 MY_IP=$(hostname -I | awk '{print $1}' | xargs)
 
-# When a root-password secret is provided the FE is locked down (password + SSL),
-# so register over a verified TLS connection. The leader is reached by IP (not in
-# the server cert SAN), so trust the chain via ssl-ca but skip hostname verification.
+# Register against the leader using whatever the FE is locked down with: TLS when
+# a CA cert secret is set (leader reached by IP, not in the cert SAN, so trust the
+# chain but skip hostname verification) and a password when the root-password
+# secret is set (via MYSQL_PWD so it never lands on disk or in argv/ps).
 ROOT_PW_SECRET="${root_password_secret_name}"
 CA_CERT_SECRET="${ca_cert_secret_name}"
 MYSQL_AUTH="-uroot"
-if [ -n "$ROOT_PW_SECRET" ]; then
-   # Pass the password via MYSQL_PWD (process env only) so it never lands on disk
-   # or in argv/ps. The CA cert is public, so writing it to disk is fine.
-   export MYSQL_PWD=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$ROOT_PW_SECRET" --query SecretString --output text)
+if [ -n "$CA_CERT_SECRET" ]; then
    mkdir -p /opt/ssl
    aws secretsmanager get-secret-value --region ${region} --secret-id "$CA_CERT_SECRET" --query SecretString --output text > /opt/ssl/starrocks-ca.crt
    MYSQL_AUTH="-uroot --ssl-ca=/opt/ssl/starrocks-ca.crt"
+fi
+if [ -n "$ROOT_PW_SECRET" ]; then
+   export MYSQL_PWD=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$ROOT_PW_SECRET" --query SecretString --output text)
 fi
 
 if [[ $LEADER_IP != $MY_IP ]]; then

@@ -116,7 +116,12 @@ variable "root_password_secret_name" {
 }
 
 variable "ca_cert_secret_name" {
-  description = "Secrets Manager secret holding the CA certificate (PEM) used to verify the FE's SSL certificate during registration. Required when root_password_secret_name is set."
+  description = "Secrets Manager secret holding the CA certificate (PEM). When set, nodes register over TLS, verifying the FE's SSL certificate against this CA."
+  default     = ""
+}
+
+variable "ssl_secret_name" {
+  description = "Secrets Manager secret (JSON: server_cert, server_key, keystore_password) used to configure the FE's MySQL-protocol TLS at boot. When set, the FE builds a PKCS12 keystore and requires secure transport."
   default     = ""
 }
 

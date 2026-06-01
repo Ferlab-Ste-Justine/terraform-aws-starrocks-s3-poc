@@ -115,19 +115,20 @@ sudo systemctl enable --now starrocks-storage.service
 sudo systemctl enable starrocks-cn
 sudo systemctl start starrocks-cn
 
-# When a root-password secret is provided the FE is locked down (password + SSL),
-# so register over a verified TLS connection. The FE is reached by its DNS name,
-# which matches the server cert SAN, so enable full hostname verification.
+# Register with the FE using whatever it is locked down with: TLS when a CA cert
+# secret is set (FE reached by its DNS name, which matches the server cert SAN, so
+# verify the hostname) and a password when the root-password secret is set (via
+# MYSQL_PWD so it never lands on disk or in argv/ps).
 ROOT_PW_SECRET="${root_password_secret_name}"
 CA_CERT_SECRET="${ca_cert_secret_name}"
 MYSQL_AUTH="-uroot"
-if [ -n "$ROOT_PW_SECRET" ]; then
-  # Pass the password via MYSQL_PWD (process env only) so it never lands on disk
-  # or in argv/ps. The CA cert is public, so writing it to disk is fine.
-  export MYSQL_PWD=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$ROOT_PW_SECRET" --query SecretString --output text)
+if [ -n "$CA_CERT_SECRET" ]; then
   mkdir -p /opt/ssl
   aws secretsmanager get-secret-value --region ${region} --secret-id "$CA_CERT_SECRET" --query SecretString --output text > /opt/ssl/starrocks-ca.crt
   MYSQL_AUTH="-uroot --ssl-ca=/opt/ssl/starrocks-ca.crt --ssl-verify-server-cert=ON"
+fi
+if [ -n "$ROOT_PW_SECRET" ]; then
+  export MYSQL_PWD=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$ROOT_PW_SECRET" --query SecretString --output text)
 fi
 
 echo "Waiting for Frontend (FE) to be available..."

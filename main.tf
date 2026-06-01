@@ -47,6 +47,7 @@ resource "aws_instance" "star_rocks_frontend" {
     additional_fe_user_data   = var.additional_fe_user_data
     root_password_secret_name = var.root_password_secret_name
     ca_cert_secret_name       = var.ca_cert_secret_name
+    ssl_secret_name           = var.ssl_secret_name
   })
   iam_instance_profile   = aws_iam_instance_profile.star_rocks_instance_profile.name
   vpc_security_group_ids = [aws_security_group.star_rocks_sg.id]
