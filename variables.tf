@@ -110,6 +110,16 @@ variable "additional_cn_user_data" {
   default = ""
 }
 
+variable "root_password_secret_name" {
+  description = "Secrets Manager secret holding the StarRocks root password. When set, nodes register against a locked-down FE using password + SSL. Empty (default) keeps passwordless, non-SSL registration."
+  default     = ""
+}
+
+variable "ca_cert_secret_name" {
+  description = "Secrets Manager secret holding the CA certificate (PEM) used to verify the FE's SSL certificate during registration. Required when root_password_secret_name is set."
+  default     = ""
+}
+
 variable "additional_ingress_rules" {
   description = "Security group rules to add for ingress"
   type = list(object({

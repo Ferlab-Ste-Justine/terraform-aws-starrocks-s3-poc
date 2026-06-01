@@ -115,12 +115,28 @@ sudo systemctl enable --now starrocks-storage.service
 sudo systemctl enable starrocks-cn
 sudo systemctl start starrocks-cn
 
+# When a root-password secret is provided the FE is locked down (password + SSL),
+# so register over a verified TLS connection. The FE is reached by its DNS name,
+# which matches the server cert SAN, so enable full hostname verification.
+ROOT_PW_SECRET="${root_password_secret_name}"
+CA_CERT_SECRET="${ca_cert_secret_name}"
+MYSQL_AUTH="-uroot"
+if [ -n "$ROOT_PW_SECRET" ]; then
+  # Pass the password via MYSQL_PWD (process env only) so it never lands on disk
+  # or in argv/ps. The CA cert is public, so writing it to disk is fine.
+  export MYSQL_PWD=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$ROOT_PW_SECRET" --query SecretString --output text)
+  mkdir -p /opt/ssl
+  aws secretsmanager get-secret-value --region ${region} --secret-id "$CA_CERT_SECRET" --query SecretString --output text > /opt/ssl/starrocks-ca.crt
+  MYSQL_AUTH="-uroot --ssl-ca=/opt/ssl/starrocks-ca.crt --ssl-verify-server-cert=ON"
+fi
+
 echo "Waiting for Frontend (FE) to be available..."
-until echo "SELECT 1;" | mysql -h ${fe_host} -P ${fe_query_port} -uroot 2>/dev/null; do
+until echo "SELECT 1;" | mysql $MYSQL_AUTH -h ${fe_host} -P ${fe_query_port} 2>/dev/null; do
   sleep 5
 done
 
 echo "Registering Backend with Frontend..."
-echo "ALTER SYSTEM ADD COMPUTE NODE \"$(hostname -I | awk '{print $1}'):9050\";" | mysql -h ${fe_host} -P ${fe_query_port} -uroot
+echo "ALTER SYSTEM ADD COMPUTE NODE \"$(hostname -I | awk '{print $1}'):9050\";" | mysql $MYSQL_AUTH -h ${fe_host} -P ${fe_query_port}
+unset MYSQL_PWD
 
 ${additional_cn_user_data}

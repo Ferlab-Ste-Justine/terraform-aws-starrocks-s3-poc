@@ -144,10 +144,26 @@ chmod 777 /tmp/starrocks-hadoop /tmp/starrocks-s3a-buffer
 
 LEADER_IP=$(aws ssm get-parameter --name ${ssm_parameter_name} --region ${region} --output text --query "Parameter.Value")
 MY_IP=$(hostname -I | awk '{print $1}' | xargs)
+
+# When a root-password secret is provided the FE is locked down (password + SSL),
+# so register over a verified TLS connection. The leader is reached by IP (not in
+# the server cert SAN), so trust the chain via ssl-ca but skip hostname verification.
+ROOT_PW_SECRET="${root_password_secret_name}"
+CA_CERT_SECRET="${ca_cert_secret_name}"
+MYSQL_AUTH="-uroot"
+if [ -n "$ROOT_PW_SECRET" ]; then
+   # Pass the password via MYSQL_PWD (process env only) so it never lands on disk
+   # or in argv/ps. The CA cert is public, so writing it to disk is fine.
+   export MYSQL_PWD=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$ROOT_PW_SECRET" --query SecretString --output text)
+   mkdir -p /opt/ssl
+   aws secretsmanager get-secret-value --region ${region} --secret-id "$CA_CERT_SECRET" --query SecretString --output text > /opt/ssl/starrocks-ca.crt
+   MYSQL_AUTH="-uroot --ssl-ca=/opt/ssl/starrocks-ca.crt"
+fi
+
 if [[ $LEADER_IP != $MY_IP ]]; then
    echo "Waiting for Frontend (FE) to be available..."
    for i in {1..60}; do
-      if mysql -h $LEADER_IP -P 9030 -u root -e "SELECT 1" 2>/dev/null; then
+      if mysql $MYSQL_AUTH -h $LEADER_IP -P 9030 -e "SELECT 1" 2>/dev/null; then
                echo "Leader is ready!";
                break
       fi;
@@ -156,8 +172,9 @@ if [[ $LEADER_IP != $MY_IP ]]; then
    done;
 
    echo "Registering Backend with Frontend..."
-   echo "ALTER SYSTEM ADD FOLLOWER \"$MY_IP:9010\";" | mysql -h $LEADER_IP -P 9030 -uroot
+   echo "ALTER SYSTEM ADD FOLLOWER \"$MY_IP:9010\";" | mysql $MYSQL_AUTH -h $LEADER_IP -P 9030
 fi
+unset MYSQL_PWD
 
 sudo systemctl daemon-reload
 sudo systemctl enable starrocks-fe
