@@ -172,7 +172,6 @@ SSLEOF
    unset SSL_JSON KEYSTORE_PW
 fi
 
-LEADER_IP=$(aws ssm get-parameter --name ${ssm_parameter_name} --region ${region} --output text --query "Parameter.Value")
 MY_IP=$(hostname -I | awk '{print $1}' | xargs)
 
 # Register against the leader using whatever the FE is locked down with: TLS when
@@ -191,20 +190,26 @@ if [ -n "$ROOT_PW_SECRET" ]; then
    export MYSQL_PWD=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$ROOT_PW_SECRET" --query SecretString --output text)
 fi
 
-if [[ $LEADER_IP != $MY_IP ]]; then
-   echo "Waiting for Frontend (FE) to be available..."
-   for i in {1..60}; do
-      if mysql $MYSQL_AUTH -h $LEADER_IP -P 9030 -e "SELECT 1" 2>/dev/null; then
-               echo "Leader is ready!";
-               break
-      fi;
-         echo "Waiting for leader...";
-         sleep 5;
-   done;
-
-   echo "Registering Backend with Frontend..."
-   echo "ALTER SYSTEM ADD FOLLOWER \"$MY_IP:9010\";" | mysql $MYSQL_AUTH -h $LEADER_IP -P 9030
-fi
+# Re-read the SSM leader IP on every iteration so we pick up the leader as soon as
+# it is designated (the value starts as a placeholder and is set out of band). If
+# the SSM names this node, it is the leader -> nothing to register, exit at once.
+# Otherwise wait for the leader to answer, register as a follower, then stop.
+# Capped at ~5 min so cloud-init does not block forever; the FE service
+# (Restart=always) re-reads the SSM independently for the leader election.
+for i in {1..60}; do
+   LEADER_IP=$(aws ssm get-parameter --name ${ssm_parameter_name} --region ${region} --output text --query "Parameter.Value")
+   if [ "$LEADER_IP" = "$MY_IP" ]; then
+      echo "This node is the leader; no follower registration needed."
+      break
+   fi
+   if mysql $MYSQL_AUTH -h "$LEADER_IP" -P 9030 -e "SELECT 1" 2>/dev/null; then
+      echo "Leader $LEADER_IP is ready; registering as follower."
+      echo "ALTER SYSTEM ADD FOLLOWER \"$MY_IP:9010\";" | mysql $MYSQL_AUTH -h "$LEADER_IP" -P 9030
+      break
+   fi
+   echo "Waiting for the leader (SSM=$LEADER_IP)..."
+   sleep 5
+done
 unset MYSQL_PWD
 
 sudo systemctl daemon-reload
