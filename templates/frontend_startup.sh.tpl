@@ -24,8 +24,18 @@ EOF
 sudo sysctl -p
 
 cd /opt
-sudo wget --quiet ${download_base_url}/StarRocks-${starrocks_version}-$SR_ARCH.tar.gz
-sudo tar -xzvf StarRocks-${starrocks_version}-$SR_ARCH.tar.gz
+# Fail fast if the binary cannot be downloaded or extracted, instead of silently
+# continuing and producing a half-installed node (the download is a ~GB tarball
+# from the private mirror; a reset mid-transfer must abort the boot, not proceed).
+SR_TARBALL=StarRocks-${starrocks_version}-$SR_ARCH.tar.gz
+if ! sudo wget --tries=3 --timeout=60 -O "$SR_TARBALL" "${download_base_url}/$SR_TARBALL"; then
+   echo "FATAL: failed to download $SR_TARBALL from ${download_base_url}" >&2
+   exit 1
+fi
+if ! sudo tar -xzf "$SR_TARBALL"; then
+   echo "FATAL: failed to extract $SR_TARBALL (incomplete download?)" >&2
+   exit 1
+fi
 
 sudo mkdir -p ${starrocks_data_path}/fe/
 cp -a StarRocks-${starrocks_version}-$SR_ARCH/fe ${starrocks_data_path}/
