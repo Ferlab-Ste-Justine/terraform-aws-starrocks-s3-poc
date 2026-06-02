@@ -16,6 +16,33 @@ where the default for `PORT` is `9030`. After that, you can access Star Rocks us
 mysql -h 127.0.0.1 -P 9030 -u root
 ```
 
+## Binary download source and CPU architecture (x86_64 / Graviton)
+
+Nodes download the StarRocks tarball from `var.download_base_url` (default the public
+`https://releases.starrocks.io/starrocks`). Point it at a private mirror when external
+downloads are blocked. The full URL the nodes fetch is:
+
+```
+<download_base_url>/StarRocks-<star_rocks_version>-<arch>.tar.gz
+```
+
+`<arch>` is **inferred at boot** from the instance's CPU (`uname -m`), not passed as a
+variable — the architecture is already fixed by `ami_id` and the instance types, so this
+keeps a single source of truth and removes any chance of a mismatch:
+
+- `x86_64` -> `centos-amd64` (matches the public StarRocks filename)
+- `aarch64` -> `arm64`
+
+To run on **Graviton (arm64)**, set `ami_id` to an arm64 AMI and pick arm64 instance types
+(e.g. `m7gd.4xlarge` for the compute nodes, `m7g.large` for the FE). StarRocks publishes **no
+arm64 tarball**, so the mirror must host a `StarRocks-<version>-arm64.tar.gz` built from the
+official `starrocks/artifacts-*` Docker image (see the consumer repo's publish scripts). The
+JVM directory (`.x86_64` / `.aarch64`) is likewise resolved at boot from the installed JDK,
+so no arch-specific path is hardcoded.
+
+> Monitoring (Prometheus) is still x86_64-only and unaffected; it runs on its own
+> `monitoring_instance_type`.
+
 ## Upgrade Process
 We do a modified canary process for upgrades.
 1. Ensure the SSM parameter for the leader IP is up to date.

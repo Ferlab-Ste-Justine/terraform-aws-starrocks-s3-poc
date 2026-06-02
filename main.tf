@@ -42,7 +42,7 @@ resource "aws_instance" "star_rocks_frontend" {
     bucket                    = "${var.starrocks_bucket}"
     vpc_cidr                  = data.aws_vpc.target_vpc.cidr_block
     java_heap_size_mb         = var.frontend_heap_size
-    region                    = var.region
+    download_base_url         = var.download_base_url
     ssm_parameter_name        = aws_ssm_parameter.leader_ip.name
     additional_fe_user_data   = var.additional_fe_user_data
     root_password_secret_name = var.root_password_secret_name
@@ -94,6 +94,7 @@ resource "aws_instance" "star_rocks_compute_nodes" {
     region                    = var.region
     vpc_cidr                  = data.aws_vpc.target_vpc.cidr_block
     java_heap_size_mb         = var.compute_node_heap_size
+    download_base_url         = var.download_base_url
     additional_cn_user_data   = var.additional_cn_user_data
     root_password_secret_name = var.root_password_secret_name
     ca_cert_secret_name       = var.ca_cert_secret_name

@@ -2,15 +2,23 @@
 JAVA_PACKAGE=java-17-amazon-corretto
 sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 xfsprogs || (sleep 120 ; sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 xfsprogs)
 
+# Infer the CPU architecture from the running kernel rather than passing it in:
+# the arch is fully determined by the AMI/instance type, so this is the single
+# source of truth and cannot drift from a Terraform variable. SR_ARCH is the
+# StarRocks tarball suffix; JAVA_HOME is resolved from the installed JVM so the
+# arch-specific corretto directory (.x86_64 / .aarch64) is never hardcoded.
+SR_ARCH=$(uname -m | sed -e 's/x86_64/centos-amd64/' -e 's/aarch64/arm64/')
+JAVA_HOME=$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")
+
 sudo su
 
 cd /opt
-sudo wget --quiet https://releases.starrocks.io/starrocks/StarRocks-${starrocks_version}-centos-amd64.tar.gz
-sudo tar -xzvf StarRocks-${starrocks_version}-centos-amd64.tar.gz
+sudo wget --quiet ${download_base_url}/StarRocks-${starrocks_version}-$SR_ARCH.tar.gz
+sudo tar -xzvf StarRocks-${starrocks_version}-$SR_ARCH.tar.gz
 
 sudo mkdir -p ${starrocks_data_path}/storage
 sudo mkdir -p ${starrocks_data_path}/cn
-cp -a StarRocks-${starrocks_version}-centos-amd64/be/. ${starrocks_data_path}/cn/
+cp -a StarRocks-${starrocks_version}-$SR_ARCH/be/. ${starrocks_data_path}/cn/
 
 sudo tee /etc/sysctl.conf > /dev/null << EOF
 vm.swappiness = 0
@@ -98,9 +106,9 @@ After=starrocks-storage.service network.target
 
 [Service]
 Type=simple
-Environment="JAVA_HOME=/usr/lib/jvm/$JAVA_PACKAGE.x86_64/" 
+Environment="JAVA_HOME=$JAVA_HOME"
 Environment="STARROCKS_HOME=${starrocks_data_path}"
-Environment="LD_LIBRARY_PATH=/usr/lib/jvm/$JAVA_PACKAGE.x86_64/lib/server/"
+Environment="LD_LIBRARY_PATH=$JAVA_HOME/lib/server/"
 Environment="JAVA_OPTS=-Djava.net.preferIPv4Stack=true -Xmx${java_heap_size_mb}m -XX:+UseG1GC -Djava.security.policy=${starrocks_data_path}/conf/udf_security.policy"
 ExecStart=/opt/starrocks/cn/bin/start_cn.sh
 ExecStop=/opt/starrocks/cn/bin/stop_cn.sh
