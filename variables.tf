@@ -116,7 +116,7 @@ variable "additional_cn_user_data" {
 }
 
 variable "root_password_secret_name" {
-  description = "Secrets Manager secret holding the StarRocks root password. When set, nodes register against a locked-down FE using password + SSL. Empty (default) keeps passwordless, non-SSL registration."
+  description = "Secrets Manager secret holding the StarRocks root password. "
   default     = ""
 }
 

@@ -197,7 +197,8 @@ if [ -n "$CA_CERT_SECRET" ]; then
    MYSQL_AUTH="-uroot --ssl-ca=/opt/ssl/starrocks-ca.crt"
 fi
 if [ -n "$ROOT_PW_SECRET" ]; then
-   export MYSQL_PWD=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$ROOT_PW_SECRET" --query SecretString --output text)
+   ROOT_PW=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$ROOT_PW_SECRET" --query SecretString --output text)
+   export MYSQL_PWD="$ROOT_PW"
 fi
 
 # Re-read the SSM leader IP on every iteration so we pick up the leader as soon as
@@ -206,10 +207,12 @@ fi
 # Otherwise wait for the leader to answer, register as a follower, then stop.
 # Capped at ~5 min so cloud-init does not block forever; the FE service
 # (Restart=always) re-reads the SSM independently for the leader election.
+IS_LEADER=0
 for i in {1..60}; do
    LEADER_IP=$(aws ssm get-parameter --name ${ssm_parameter_name} --region ${region} --output text --query "Parameter.Value")
    if [ "$LEADER_IP" = "$MY_IP" ]; then
       echo "This node is the leader; no follower registration needed."
+      IS_LEADER=1
       break
    fi
    if mysql $MYSQL_AUTH -h "$LEADER_IP" -P 9030 -e "SELECT 1" 2>/dev/null; then
@@ -225,5 +228,26 @@ unset MYSQL_PWD
 sudo systemctl daemon-reload
 sudo systemctl enable starrocks-fe
 sudo systemctl start starrocks-fe
+
+# Once the leader's FE is up, initialize the root password from the secret. StarRocks
+# boots root passwordless, so the first connection is unauthenticated; followers and
+# compute nodes then authenticate with this password. Idempotent: if a re-run finds the
+# password already set, it connects with it and skips. The SET statement is piped via
+# stdin (not -e) so the literal never lands in argv/ps, consistent with the rest of the file.
+if [ "$IS_LEADER" = "1" ] && [ -n "$ROOT_PW_SECRET" ]; then
+   for i in {1..60}; do
+      if MYSQL_PWD="$ROOT_PW" mysql $MYSQL_AUTH -h 127.0.0.1 -P 9030 -e "SELECT 1" 2>/dev/null; then
+         echo "Root password already initialized."
+         break
+      fi
+      if echo "SET PASSWORD FOR 'root' = PASSWORD('$ROOT_PW');" | mysql $MYSQL_AUTH -h 127.0.0.1 -P 9030 2>/dev/null; then
+         echo "Root password initialized from secret."
+         break
+      fi
+      echo "Waiting for local FE to initialize root password..."
+      sleep 5
+   done
+fi
+unset ROOT_PW
 
 ${additional_fe_user_data}
