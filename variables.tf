@@ -86,6 +86,11 @@ variable "star_rocks_version" {
   default = "3.4.4"
 }
 
+variable "download_base_url" {
+  description = "Base URL the nodes download the StarRocks tarball from. The full path is <download_base_url>/StarRocks-<version>-<arch>.tar.gz, where <arch> is inferred at boot from the instance's CPU (centos-amd64 on x86_64, arm64 on aarch64). Defaults to the public StarRocks releases server; point it at a private mirror when external downloads are blocked. StarRocks ships no arm64 tarball, so for Graviton the mirror must host one built from the starrocks/artifacts image (see scripts)."
+  default     = "https://releases.starrocks.io/starrocks"
+}
+
 variable "star_rocks_upgrade_version" {
   default = ""
 }
@@ -108,6 +113,21 @@ variable "additional_fe_user_data" {
 
 variable "additional_cn_user_data" {
   default = ""
+}
+
+variable "root_password_secret_name" {
+  description = "Secrets Manager secret holding the StarRocks root password. "
+  default     = ""
+}
+
+variable "ca_cert_secret_name" {
+  description = "Secrets Manager secret holding the CA certificate (PEM). When set, nodes register over TLS, verifying the FE's SSL certificate against this CA."
+  default     = ""
+}
+
+variable "ssl_secret_name" {
+  description = "Secrets Manager secret (JSON: server_cert, server_key, keystore_password) used to configure the FE's MySQL-protocol TLS at boot. When set, the FE builds a PKCS12 keystore and requires secure transport."
+  default     = ""
 }
 
 variable "additional_ingress_rules" {

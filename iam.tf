@@ -1,3 +1,11 @@
+locals {
+  registration_secret_arns = compact([
+    var.root_password_secret_name != "" ? "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${var.root_password_secret_name}*" : "",
+    var.ca_cert_secret_name != "" ? "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${var.ca_cert_secret_name}*" : "",
+    var.ssl_secret_name != "" ? "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${var.ssl_secret_name}*" : "",
+  ])
+}
+
 resource "aws_iam_role" "star_rocks_role" {
   name = "${var.project}-${var.environment}-role"
 
@@ -65,6 +73,33 @@ resource "aws_iam_role_policy_attachment" "s3_attach" {
 resource "aws_iam_role_policy_attachment" "ssm_attach" {
   role       = aws_iam_role.star_rocks_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_policy" "registration_secrets" {
+  count = length(local.registration_secret_arns) > 0 ? 1 : 0
+
+  name        = "${var.project}-${var.environment}-registration-secrets-policy"
+  description = "Allows Star Rocks EC2 instances to read the root password and CA cert for secure node registration"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = local.registration_secret_arns
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "registration_secrets_attach" {
+  count = length(local.registration_secret_arns) > 0 ? 1 : 0
+
+  role       = aws_iam_role.star_rocks_role.name
+  policy_arn = aws_iam_policy.registration_secrets[0].arn
 }
 
 resource "aws_iam_role_policy_attachment" "additional_policy_attachments" {

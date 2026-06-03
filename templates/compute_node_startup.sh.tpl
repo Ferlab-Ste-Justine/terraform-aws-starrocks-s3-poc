@@ -2,15 +2,33 @@
 JAVA_PACKAGE=java-17-amazon-corretto
 sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 xfsprogs || (sleep 120 ; sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 xfsprogs)
 
+# Infer the CPU architecture from the running kernel rather than passing it in:
+# the arch is fully determined by the AMI/instance type, so this is the single
+# source of truth and cannot drift from a Terraform variable. SR_ARCH is the
+# StarRocks tarball suffix; JAVA_HOME is resolved from the installed JVM so the
+# arch-specific corretto directory (.x86_64 / .aarch64) is never hardcoded.
+SR_ARCH=$(uname -m | sed -e 's/x86_64/centos-amd64/' -e 's/aarch64/arm64/')
+JAVA_HOME=$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")
+
 sudo su
 
 cd /opt
-sudo wget --quiet https://releases.starrocks.io/starrocks/StarRocks-${starrocks_version}-centos-amd64.tar.gz
-sudo tar -xzvf StarRocks-${starrocks_version}-centos-amd64.tar.gz
+# Fail fast if the binary cannot be downloaded or extracted, instead of silently
+# continuing and producing a half-installed node (the download is a ~GB tarball
+# from the private mirror; a reset mid-transfer must abort the boot, not proceed).
+SR_TARBALL=StarRocks-${starrocks_version}-$SR_ARCH.tar.gz
+if ! sudo wget --tries=3 --timeout=60 -O "$SR_TARBALL" "${download_base_url}/$SR_TARBALL"; then
+   echo "FATAL: failed to download $SR_TARBALL from ${download_base_url}" >&2
+   exit 1
+fi
+if ! sudo tar -xzf "$SR_TARBALL"; then
+   echo "FATAL: failed to extract $SR_TARBALL (incomplete download?)" >&2
+   exit 1
+fi
 
 sudo mkdir -p ${starrocks_data_path}/storage
 sudo mkdir -p ${starrocks_data_path}/cn
-cp -a StarRocks-${starrocks_version}-centos-amd64/be/. ${starrocks_data_path}/cn/
+cp -a StarRocks-${starrocks_version}-$SR_ARCH/be/. ${starrocks_data_path}/cn/
 
 sudo tee /etc/sysctl.conf > /dev/null << EOF
 vm.swappiness = 0
@@ -98,10 +116,10 @@ After=starrocks-storage.service network.target
 
 [Service]
 Type=simple
-Environment="JAVA_HOME=/usr/lib/jvm/$JAVA_PACKAGE.x86_64/" 
+Environment="JAVA_HOME=$JAVA_HOME"
 Environment="STARROCKS_HOME=${starrocks_data_path}"
-Environment="LD_LIBRARY_PATH=/usr/lib/jvm/$JAVA_PACKAGE.x86_64/lib/server/"
-Environment="JAVA_OPTS=-Djava.net.preferIPv4Stack=true -Xmx${java_heap_size_mb}m -XX:+UseG1GC -Djava.security.policy=${starrocks_data_path}/conf/udf_security.policy"
+Environment="LD_LIBRARY_PATH=$JAVA_HOME/lib/server/"
+Environment="JAVA_OPTS=-Djava.net.preferIPv4Stack=true -Xmx${java_heap_size_mb}m -XX:+UseG1GC -Djava.security.policy=${starrocks_data_path}cn/conf/udf_security.policy"
 ExecStart=/opt/starrocks/cn/bin/start_cn.sh
 ExecStop=/opt/starrocks/cn/bin/stop_cn.sh
 Restart=always
@@ -115,12 +133,29 @@ sudo systemctl enable --now starrocks-storage.service
 sudo systemctl enable starrocks-cn
 sudo systemctl start starrocks-cn
 
+# Register with the FE using whatever it is locked down with: TLS when a CA cert
+# secret is set (FE reached by its DNS name, which matches the server cert SAN, so
+# verify the hostname) and a password when the root-password secret is set (via
+# MYSQL_PWD so it never lands on disk or in argv/ps).
+ROOT_PW_SECRET="${root_password_secret_name}"
+CA_CERT_SECRET="${ca_cert_secret_name}"
+MYSQL_AUTH="-uroot"
+if [ -n "$CA_CERT_SECRET" ]; then
+  mkdir -p /opt/ssl
+  aws secretsmanager get-secret-value --region ${region} --secret-id "$CA_CERT_SECRET" --query SecretString --output text > /opt/ssl/starrocks-ca.crt
+  MYSQL_AUTH="-uroot --ssl-ca=/opt/ssl/starrocks-ca.crt --ssl-verify-server-cert=ON"
+fi
+if [ -n "$ROOT_PW_SECRET" ]; then
+  export MYSQL_PWD=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$ROOT_PW_SECRET" --query SecretString --output text)
+fi
+
 echo "Waiting for Frontend (FE) to be available..."
-until echo "SELECT 1;" | mysql -h ${fe_host} -P ${fe_query_port} -uroot 2>/dev/null; do
+until echo "SELECT 1;" | mysql $MYSQL_AUTH -h ${fe_host} -P ${fe_query_port} 2>/dev/null; do
   sleep 5
 done
 
 echo "Registering Backend with Frontend..."
-echo "ALTER SYSTEM ADD COMPUTE NODE \"$(hostname -I | awk '{print $1}'):9050\";" | mysql -h ${fe_host} -P ${fe_query_port} -uroot
+echo "ALTER SYSTEM ADD COMPUTE NODE \"$(hostname -I | awk '{print $1}'):9050\";" | mysql $MYSQL_AUTH -h ${fe_host} -P ${fe_query_port}
+unset MYSQL_PWD
 
 ${additional_cn_user_data}

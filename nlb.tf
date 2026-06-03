@@ -15,9 +15,9 @@ resource "aws_lb_target_group" "frontend_query_tg" {
 }
 
 resource "aws_lb_target_group_attachment" "frontend_query_attachment" {
-  for_each         = { for idx, id in aws_instance.star_rocks_frontend.*.id : idx => id }
+  count            = local.canary_frontend_node_count
   target_group_arn = aws_lb_target_group.frontend_query_tg.arn
-  target_id        = each.value
+  target_id        = aws_instance.star_rocks_frontend[count.index].id
 }
 
 resource "aws_lb_listener" "frontend_query_listener" {

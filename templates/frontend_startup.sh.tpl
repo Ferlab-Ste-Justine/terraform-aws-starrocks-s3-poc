@@ -1,6 +1,14 @@
 #!/bin/bash
 JAVA_PACKAGE=java-17-amazon-corretto
-sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 || (sleep 120 ; sudo dnf install -y $JAVA_PACKAGE-devel mariadb105)
+sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 jq || (sleep 120 ; sudo dnf install -y $JAVA_PACKAGE-devel mariadb105 jq)
+
+# Infer the CPU architecture from the running kernel rather than passing it in:
+# the arch is fully determined by the AMI/instance type, so this is the single
+# source of truth and cannot drift from a Terraform variable. SR_ARCH is the
+# StarRocks tarball suffix; JAVA_HOME is resolved from the installed JVM so the
+# arch-specific corretto directory (.x86_64 / .aarch64) is never hardcoded.
+SR_ARCH=$(uname -m | sed -e 's/x86_64/centos-amd64/' -e 's/aarch64/arm64/')
+JAVA_HOME=$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")
 
 sudo su
 
@@ -16,11 +24,21 @@ EOF
 sudo sysctl -p
 
 cd /opt
-sudo wget --quiet https://releases.starrocks.io/starrocks/StarRocks-${starrocks_version}-centos-amd64.tar.gz
-sudo tar -xzvf StarRocks-${starrocks_version}-centos-amd64.tar.gz
+# Fail fast if the binary cannot be downloaded or extracted, instead of silently
+# continuing and producing a half-installed node (the download is a ~GB tarball
+# from the private mirror; a reset mid-transfer must abort the boot, not proceed).
+SR_TARBALL=StarRocks-${starrocks_version}-$SR_ARCH.tar.gz
+if ! sudo wget --tries=3 --timeout=60 -O "$SR_TARBALL" "${download_base_url}/$SR_TARBALL"; then
+   echo "FATAL: failed to download $SR_TARBALL from ${download_base_url}" >&2
+   exit 1
+fi
+if ! sudo tar -xzf "$SR_TARBALL"; then
+   echo "FATAL: failed to extract $SR_TARBALL (incomplete download?)" >&2
+   exit 1
+fi
 
 sudo mkdir -p ${starrocks_data_path}/fe/
-cp -a StarRocks-${starrocks_version}-centos-amd64/fe ${starrocks_data_path}/
+cp -a StarRocks-${starrocks_version}-$SR_ARCH/fe ${starrocks_data_path}/
 sudo mkdir -p ${starrocks_data_path}/storage
 sudo mkdir -p ${starrocks_data_path}/fe/meta
 
@@ -102,9 +120,9 @@ After=network.target
 
 [Service]
 Type=simple
-Environment="JAVA_HOME=/usr/lib/jvm/$JAVA_PACKAGE.x86_64/"
+Environment="JAVA_HOME=$JAVA_HOME"
 Environment="STARROCKS_HOME=${starrocks_data_path}"
-Environment="LD_LIBRARY_PATH=/usr/lib/jvm/$JAVA_PACKAGE.x86_64/lib/server/"
+Environment="LD_LIBRARY_PATH=$JAVA_HOME/lib/server/"
 Environment="JAVA_OPTS=-Djava.net.preferIPv4Stack=true -Xmx${java_heap_size_mb}m -XX:+UseG1GC -Djava.security.policy=${starrocks_data_path}/conf/udf_security.policy"
 ExecStart=${starrocks_data_path}/fe/bin/start_sysd_daemon.sh
 ExecStop=${starrocks_data_path}/fe/bin/stop_fe.sh
@@ -142,25 +160,94 @@ EOF
 mkdir -p /tmp/starrocks-hadoop /tmp/starrocks-s3a-buffer
 chmod 777 /tmp/starrocks-hadoop /tmp/starrocks-s3a-buffer
 
-LEADER_IP=$(aws ssm get-parameter --name ${ssm_parameter_name} --region ${region} --output text --query "Parameter.Value")
-MY_IP=$(hostname -I | awk '{print $1}' | xargs)
-if [[ $LEADER_IP != $MY_IP ]]; then
-   echo "Waiting for Frontend (FE) to be available..."
-   for i in {1..60}; do
-      if mysql -h $LEADER_IP -P 9030 -u root -e "SELECT 1" 2>/dev/null; then
-               echo "Leader is ready!";
-               break
-      fi;
-         echo "Waiting for leader...";
-         sleep 5;
-   done;
-
-   echo "Registering Backend with Frontend..."
-   echo "ALTER SYSTEM ADD FOLLOWER \"$MY_IP:9010\";" | mysql -h $LEADER_IP -P 9030 -uroot
+# When an SSL secret is provided, serve MySQL-protocol connections over TLS and
+# require it. The cert/key are packed into a PKCS12 keystore (the only artifact
+# StarRocks reads at runtime), then the plaintext copies are removed.
+SSL_SECRET="${ssl_secret_name}"
+if [ -n "$SSL_SECRET" ]; then
+   mkdir -p /opt/ssl
+   umask 077
+   SSL_JSON=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$SSL_SECRET" --query SecretString --output text)
+   echo "$SSL_JSON" | jq -r .server_cert > /opt/ssl/starrocks.crt
+   echo "$SSL_JSON" | jq -r .server_key > /opt/ssl/starrocks.key
+   KEYSTORE_PW=$(echo "$SSL_JSON" | jq -r .keystore_password)
+   openssl pkcs12 -export -in /opt/ssl/starrocks.crt -inkey /opt/ssl/starrocks.key -out /opt/ssl/starrocks.p12 -passout pass:"$KEYSTORE_PW"
+   rm -f /opt/ssl/starrocks.crt /opt/ssl/starrocks.key
+   cat >> ${starrocks_data_path}/fe/conf/fe.conf << SSLEOF
+ssl_keystore_location = /opt/ssl/starrocks.p12
+ssl_keystore_password = $KEYSTORE_PW
+ssl_key_password = $KEYSTORE_PW
+ssl_force_secure_transport = true
+SSLEOF
+   unset SSL_JSON KEYSTORE_PW
 fi
+
+MY_IP=$(hostname -I | awk '{print $1}' | xargs)
+
+# Register against the leader using whatever the FE is locked down with: TLS when
+# a CA cert secret is set (leader reached by IP, not in the cert SAN, so trust the
+# chain but skip hostname verification) and a password when the root-password
+# secret is set (via MYSQL_PWD so it never lands on disk or in argv/ps).
+ROOT_PW_SECRET="${root_password_secret_name}"
+CA_CERT_SECRET="${ca_cert_secret_name}"
+MYSQL_AUTH="-uroot"
+if [ -n "$CA_CERT_SECRET" ]; then
+   mkdir -p /opt/ssl
+   aws secretsmanager get-secret-value --region ${region} --secret-id "$CA_CERT_SECRET" --query SecretString --output text > /opt/ssl/starrocks-ca.crt
+   MYSQL_AUTH="-uroot --ssl-ca=/opt/ssl/starrocks-ca.crt"
+fi
+if [ -n "$ROOT_PW_SECRET" ]; then
+   ROOT_PW=$(aws secretsmanager get-secret-value --region ${region} --secret-id "$ROOT_PW_SECRET" --query SecretString --output text)
+   export MYSQL_PWD="$ROOT_PW"
+fi
+
+# Re-read the SSM leader IP on every iteration so we pick up the leader as soon as
+# it is designated (the value starts as a placeholder and is set out of band). If
+# the SSM names this node, it is the leader -> nothing to register, exit at once.
+# Otherwise wait for the leader to answer, register as a follower, then stop.
+# Capped at ~5 min so cloud-init does not block forever; the FE service
+# (Restart=always) re-reads the SSM independently for the leader election.
+IS_LEADER=0
+for i in {1..60}; do
+   LEADER_IP=$(aws ssm get-parameter --name ${ssm_parameter_name} --region ${region} --output text --query "Parameter.Value")
+   if [ "$LEADER_IP" = "$MY_IP" ]; then
+      echo "This node is the leader; no follower registration needed."
+      IS_LEADER=1
+      break
+   fi
+   if mysql $MYSQL_AUTH -h "$LEADER_IP" -P 9030 -e "SELECT 1" 2>/dev/null; then
+      echo "Leader $LEADER_IP is ready; registering as follower."
+      echo "ALTER SYSTEM ADD FOLLOWER \"$MY_IP:9010\";" | mysql $MYSQL_AUTH -h "$LEADER_IP" -P 9030
+      break
+   fi
+   echo "Waiting for the leader (SSM=$LEADER_IP)..."
+   sleep 5
+done
+unset MYSQL_PWD
 
 sudo systemctl daemon-reload
 sudo systemctl enable starrocks-fe
 sudo systemctl start starrocks-fe
+
+# Once the leader's FE is up, initialize the root password from the secret. StarRocks
+# boots root passwordless, so the first connection is unauthenticated; followers and
+# compute nodes then authenticate with this password. Idempotent: if a re-run finds the
+# password already set, it connects with it and skips. The SET statement is piped via
+# stdin (not -e) so the literal never lands in argv/ps, consistent with the rest of the file.
+if [ "$IS_LEADER" = "1" ] && [ -n "$ROOT_PW_SECRET" ]; then
+   for i in {1..60}; do
+      if MYSQL_PWD="$ROOT_PW" mysql $MYSQL_AUTH -h 127.0.0.1 -P 9030 -e "SELECT 1" 2>/dev/null; then
+         echo "Root password already initialized."
+         break
+      fi
+      if echo "SET PASSWORD FOR 'root' = PASSWORD('$ROOT_PW');" | mysql $MYSQL_AUTH -h 127.0.0.1 -P 9030 2>/dev/null; then
+         echo "Root password initialized from secret."
+         break
+      fi
+      echo "Waiting for local FE to initialize root password..."
+      sleep 5
+   done
+fi
+unset ROOT_PW
 
 ${additional_fe_user_data}

@@ -36,15 +36,18 @@ resource "aws_instance" "star_rocks_frontend" {
   ami           = var.ami_id
   instance_type = var.frontend_instance_type
   user_data = templatefile("${path.module}/templates/frontend_startup.sh.tpl", {
-    starrocks_version       = count.index == 0 ? var.star_rocks_version : local.canary_version
-    starrocks_data_path     = var.starrocks_data_path
-    region                  = var.region
-    bucket                  = "${var.starrocks_bucket}"
-    vpc_cidr                = data.aws_vpc.target_vpc.cidr_block
-    java_heap_size_mb       = var.frontend_heap_size
-    region                  = var.region
-    ssm_parameter_name      = aws_ssm_parameter.leader_ip.name
-    additional_fe_user_data = var.additional_fe_user_data
+    starrocks_version         = count.index == 0 ? var.star_rocks_version : local.canary_version
+    starrocks_data_path       = var.starrocks_data_path
+    region                    = var.region
+    bucket                    = "${var.starrocks_bucket}"
+    vpc_cidr                  = data.aws_vpc.target_vpc.cidr_block
+    java_heap_size_mb         = var.frontend_heap_size
+    download_base_url         = var.download_base_url
+    ssm_parameter_name        = aws_ssm_parameter.leader_ip.name
+    additional_fe_user_data   = var.additional_fe_user_data
+    root_password_secret_name = var.root_password_secret_name
+    ca_cert_secret_name       = var.ca_cert_secret_name
+    ssl_secret_name           = var.ssl_secret_name
   })
   iam_instance_profile   = aws_iam_instance_profile.star_rocks_instance_profile.name
   vpc_security_group_ids = [aws_security_group.star_rocks_sg.id]
@@ -84,13 +87,17 @@ resource "aws_instance" "star_rocks_compute_nodes" {
   ami           = var.ami_id
   instance_type = var.compute_node_instance_type
   user_data = templatefile("${path.module}/templates/compute_node_startup.sh.tpl", {
-    starrocks_version       = count.index == (local.canary_compute_node_count - 1) ? var.star_rocks_version : local.canary_version
-    starrocks_data_path     = var.starrocks_data_path
-    fe_host                 = "${var.project}-${var.environment}.${var.domain_name}"
-    fe_query_port           = 9030
-    vpc_cidr                = data.aws_vpc.target_vpc.cidr_block
-    java_heap_size_mb       = var.compute_node_heap_size
-    additional_cn_user_data = var.additional_cn_user_data
+    starrocks_version         = count.index == (local.canary_compute_node_count - 1) ? var.star_rocks_version : local.canary_version
+    starrocks_data_path       = var.starrocks_data_path
+    fe_host                   = "${var.project}-${var.environment}.${var.domain_name}"
+    fe_query_port             = 9030
+    region                    = var.region
+    vpc_cidr                  = data.aws_vpc.target_vpc.cidr_block
+    java_heap_size_mb         = var.compute_node_heap_size
+    download_base_url         = var.download_base_url
+    additional_cn_user_data   = var.additional_cn_user_data
+    root_password_secret_name = var.root_password_secret_name
+    ca_cert_secret_name       = var.ca_cert_secret_name
   })
   iam_instance_profile   = aws_iam_instance_profile.star_rocks_instance_profile.name
   vpc_security_group_ids = [aws_security_group.star_rocks_sg.id]
