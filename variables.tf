@@ -130,6 +130,21 @@ variable "ssl_secret_name" {
   default     = ""
 }
 
+variable "ranger_host" {
+  description = "Full Apache Ranger admin REST URL (e.g. http://ranger:6080). When set, the FE enables Ranger access control (access_control = ranger) and installs the plugin config files in fe/conf/. The value is used verbatim as ranger.plugin.starrocks.policy.rest.url."
+  default     = ""
+}
+
+variable "ranger_sync_username" {
+  description = "Username the StarRocks Ranger plugin uses to authenticate to the Ranger admin and download policies. Used only when ranger_host is set."
+  default     = ""
+}
+
+variable "ranger_sync_password_secret_name" {
+  description = "Secrets Manager secret holding the Ranger sync account password. Fetched at boot from cloud-init and injected into ranger-starrocks-security.xml. Used only when ranger_host is set."
+  default     = ""
+}
+
 variable "additional_ingress_rules" {
   description = "Security group rules to add for ingress"
   type = list(object({
