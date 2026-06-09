@@ -3,6 +3,7 @@ locals {
     var.root_password_secret_name != "" ? "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${var.root_password_secret_name}*" : "",
     var.ca_cert_secret_name != "" ? "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${var.ca_cert_secret_name}*" : "",
     var.ssl_secret_name != "" ? "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${var.ssl_secret_name}*" : "",
+    var.ranger_sync_password_secret_name != "" ? "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${var.ranger_sync_password_secret_name}*" : "",
   ])
 }
 

@@ -182,6 +182,73 @@ SSLEOF
    unset SSL_JSON KEYSTORE_PW
 fi
 
+# When a Ranger host is provided, the FE delegates access control to Apache Ranger.
+# The plugin reads two files from fe/conf/; the sync account password is fetched from
+# Secrets Manager at boot so it never lands in Terraform state or argv/ps.
+RANGER_HOST="${ranger_host}"
+if [ -n "$RANGER_HOST" ]; then
+   cat >> ${starrocks_data_path}/fe/conf/fe.conf << 'RANGEREOF'
+access_control = ranger
+RANGEREOF
+
+   RANGER_SYNC_PW=$(aws secretsmanager get-secret-value --region ${region} --secret-id "${ranger_sync_password_secret_name}" --query SecretString --output text)
+
+   cat > ${starrocks_data_path}/fe/conf/ranger-starrocks-audit.xml << 'AUDITEOF'
+<configuration>
+  <property>
+    <name>xasecure.audit.is.enabled</name>
+    <value>false</value>
+  </property>
+</configuration>
+AUDITEOF
+
+   cat > ${starrocks_data_path}/fe/conf/ranger-starrocks-security.xml << SECEOF
+<configuration>
+  <property>
+    <name>ranger.plugin.starrocks.service.name</name>
+    <value>starrocks</value>
+  </property>
+  <property>
+    <name>ranger.plugin.starrocks.policy.source.impl</name>
+    <value>org.apache.ranger.admin.client.RangerAdminRESTClient</value>
+  </property>
+  <property>
+    <name>ranger.plugin.starrocks.policy.rest.url</name>
+    <value>${ranger_host}</value>
+  </property>
+  <property>
+    <name>ranger.plugin.starrocks.policy.rest.ssl.config.file</name>
+    <value></value>
+  </property>
+  <property>
+    <name>ranger.plugin.starrocks.policy.pollIntervalMs</name>
+    <value>10000</value>
+  </property>
+  <property>
+    <name>ranger.plugin.starrocks.policy.rest.client.connection.timeoutMs</name>
+    <value>30000</value>
+  </property>
+  <property>
+    <name>ranger.plugin.starrocks.policy.rest.client.read.timeoutMs</name>
+    <value>30000</value>
+  </property>
+  <property>
+    <name>ranger.plugin.starrocks.policy.rest.client.username</name>
+    <value>${ranger_sync_username}</value>
+  </property>
+  <property>
+    <name>ranger.plugin.starrocks.policy.rest.client.password</name>
+    <value>$RANGER_SYNC_PW</value>
+  </property>
+  <property>
+    <name>ranger.plugin.starrocks.policy.rest.client.cookie.enabled</name>
+    <value>true</value>
+  </property>
+</configuration>
+SECEOF
+   unset RANGER_SYNC_PW
+fi
+
 MY_IP=$(hostname -I | awk '{print $1}' | xargs)
 
 # Register against the leader using whatever the FE is locked down with: TLS when

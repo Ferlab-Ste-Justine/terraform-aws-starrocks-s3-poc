@@ -48,6 +48,10 @@ resource "aws_instance" "star_rocks_frontend" {
     root_password_secret_name = var.root_password_secret_name
     ca_cert_secret_name       = var.ca_cert_secret_name
     ssl_secret_name           = var.ssl_secret_name
+
+    ranger_host                      = var.ranger_host
+    ranger_sync_username             = var.ranger_sync_username
+    ranger_sync_password_secret_name = var.ranger_sync_password_secret_name
   })
   iam_instance_profile   = aws_iam_instance_profile.star_rocks_instance_profile.name
   vpc_security_group_ids = [aws_security_group.star_rocks_sg.id]
