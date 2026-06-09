@@ -1,0 +1,19 @@
+name: Mirror to Azure DevOps
+
+on:
+  push:
+    branches: ['**']
+    tags: ['**']
+  delete:
+
+jobs:
+  mirror:
+    uses: Ferlab-Ste-Justine/qlin-azure-devops/.github/workflows/azdo-mirror.yml@main
+    with:
+      repo_name: ${{ github.event.repository.name }}
+      event_name: ${{ github.event_name }}
+      ref: ${{ github.ref }}
+      ref_type: ${{ github.ref_type }}
+      event_ref: ${{ github.event.ref }}
+    secrets:
+      AZDO_SSH_KEY: ${{ secrets.AZDO_SSH_KEY }}
