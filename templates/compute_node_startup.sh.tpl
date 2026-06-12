@@ -119,7 +119,7 @@ Type=simple
 Environment="JAVA_HOME=$JAVA_HOME"
 Environment="STARROCKS_HOME=${starrocks_data_path}"
 Environment="LD_LIBRARY_PATH=$JAVA_HOME/lib/server/"
-Environment="JAVA_OPTS=-Djava.net.preferIPv4Stack=true -Xmx${java_heap_size_mb}m -XX:+UseG1GC -Djava.security.policy=${starrocks_data_path}cn/conf/udf_security.policy"
+Environment="JAVA_OPTS=-Djava.net.preferIPv4Stack=true -Xmx${java_heap_size_mb}m -XX:+UseG1GC"
 ExecStart=/opt/starrocks/cn/bin/start_cn.sh
 ExecStop=/opt/starrocks/cn/bin/stop_cn.sh
 Restart=always
