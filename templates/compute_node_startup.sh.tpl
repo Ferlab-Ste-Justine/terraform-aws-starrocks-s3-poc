@@ -65,6 +65,8 @@ starlet_port=9070
 
 storage_root_path=${starrocks_data_path}/storage
 priority_networks=${vpc_cidr}
+mem_limit = 80%
+spill_local_storage_dir = ${starrocks_data_path}/storage/spill
 memory_limitation_per_thread_for_schema_change = 4
 push_worker_count_normal_priority = 6
 push_worker_count_high_priority = 6
