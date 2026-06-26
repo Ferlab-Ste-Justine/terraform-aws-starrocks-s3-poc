@@ -47,10 +47,13 @@ resource "aws_iam_policy" "cluster_policy" {
           "s3:DeleteObjectVersion",
           "s3:ListBucketVersions"
         ]
-        Resource = [
+        Resource = concat([
           "arn:aws:s3:::${var.starrocks_bucket}",
           "arn:aws:s3:::${var.starrocks_bucket}/*"
-        ]
+          ], local.binaries_s3_bucket != "" ? [
+          "arn:aws:s3:::${local.binaries_s3_bucket}",
+          "arn:aws:s3:::${local.binaries_s3_bucket}/*"
+        ] : [])
       },
       {
         Effect = "Allow"

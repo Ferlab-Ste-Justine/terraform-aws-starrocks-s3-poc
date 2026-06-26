@@ -16,6 +16,7 @@ locals {
   # Two FE nodes are needed to avoid leader election issues (cluster needs a minimum of 3 FEs)
   canary_frontend_node_count = var.star_rocks_upgrade_version != "" ? var.frontend_instance_count + 2 : var.frontend_instance_count
   canary_compute_node_count  = var.star_rocks_upgrade_version != "" ? var.compute_node_instance_count + 1 : var.compute_node_instance_count
+  binaries_s3_bucket         = startswith(var.download_base_url, "s3://") ? split("/", trimprefix(var.download_base_url, "s3://"))[0] : ""
 }
 
 # Manually controlled leader IP node for upgrades

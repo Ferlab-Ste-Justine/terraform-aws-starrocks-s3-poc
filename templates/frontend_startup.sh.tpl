@@ -28,10 +28,17 @@ cd /opt
 # continuing and producing a half-installed node (the download is a ~GB tarball
 # from the private mirror; a reset mid-transfer must abort the boot, not proceed).
 SR_TARBALL=StarRocks-${starrocks_version}-$SR_ARCH.tar.gz
+%{ if startswith(download_base_url, "s3://") ~}
+if ! sudo aws s3 cp "${download_base_url}/$SR_TARBALL" "$SR_TARBALL"; then
+   echo "FATAL: failed to download $SR_TARBALL from ${download_base_url}" >&2
+   exit 1
+fi
+%{ else ~}
 if ! sudo wget --tries=3 --timeout=60 -O "$SR_TARBALL" "${download_base_url}/$SR_TARBALL"; then
    echo "FATAL: failed to download $SR_TARBALL from ${download_base_url}" >&2
    exit 1
 fi
+%{ endif ~}
 if ! sudo tar -xzf "$SR_TARBALL"; then
    echo "FATAL: failed to extract $SR_TARBALL (incomplete download?)" >&2
    exit 1

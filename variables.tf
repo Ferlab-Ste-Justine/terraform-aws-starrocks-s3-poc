@@ -87,7 +87,7 @@ variable "star_rocks_version" {
 }
 
 variable "download_base_url" {
-  description = "Base URL the nodes download the StarRocks tarball from. The full path is <download_base_url>/StarRocks-<version>-<arch>.tar.gz, where <arch> is inferred at boot from the instance's CPU (centos-amd64 on x86_64, arm64 on aarch64). Defaults to the public StarRocks releases server; point it at a private mirror when external downloads are blocked. StarRocks ships no arm64 tarball, so for Graviton the mirror must host one built from the starrocks/artifacts image (see scripts)."
+  description = "Base URL the nodes download the StarRocks tarball from. The full path is <download_base_url>/StarRocks-<version>-<arch>.tar.gz, where <arch> is inferred at boot from the instance's CPU (centos-amd64 on x86_64, arm64 on aarch64). Supports an https:// URL (fetched with wget) or an s3:// URL (fetched with 'aws s3 cp' via the instance role and the S3 gateway endpoint, with the bucket added to the node IAM policy) — the latter removes the need for an HTTP proxy in front of S3. Defaults to the public StarRocks releases server. StarRocks ships no arm64 tarball, so for Graviton the mirror must host one built from the starrocks/artifacts image (see scripts)."
   default     = "https://releases.starrocks.io/starrocks"
 }
 
